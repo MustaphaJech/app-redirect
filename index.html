@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>LinkedIn Redirect</title>
+    <script type="text/javascript">
+        // 🔑 CRITICAL: This script grabs the authorization code and redirects it 
+        // to your mobile app's custom scheme.
+        
+        // Example custom scheme (must match your Xcode URL Type)
+        var customScheme = "tutankhamun"; 
+        
+        // Get the full URL and preserve all query parameters (like the 'code' and 'state')
+        var fullPath = window.location.href.split("?")[1];
+        
+        if (fullPath) {
+            // Redirect to your app's custom scheme using the path and query string
+            window.location.replace(customScheme + "://linkedin-redirect?" + fullPath);
+        } else {
+            // Fallback for if no code is present
+            window.location.replace(customScheme + "://linkedin-redirect");
+        }
+    </script>
+</head>
+<body>
+    <p>Redirecting to your mobile application...</p>
+</body>
+</html>
