@@ -54,13 +54,17 @@
         });
 
         function connectToGlasses() {
-            // Open a data channel for commands
+            // 1. Open the data channel for commands (This triggers the connection)
             dataConnection = peer.connect(targetPeerId);
 
             dataConnection.on('open', () => {
                 statusEl.innerText = "Direct P2P Link Active! Connected to Glasses.";
                 textInput.removeAttribute('disabled');
                 buttons.forEach(btn => btn.removeAttribute('disabled'));
+
+                // 2. NEW: Dial the glasses to tell Python to start sending its video!
+                // We pass an empty MediaStream since the browser doesn't send video back
+                peer.call(targetPeerId, null); 
             });
 
             dataConnection.on('close', () => {
