@@ -1,27 +1,112 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>LinkedIn Redirect</title>
-    <script type="text/javascript">
-        // 🔑 CRITICAL: This script grabs the authorization code and redirects it 
-        // to your mobile app's custom scheme.
-        
-        // Example custom scheme (must match your Xcode URL Type)
-        var customScheme = "bumpapp"; 
-        
-        // Get the full URL and preserve all query parameters (like the 'code' and 'state')
-        var fullPath = window.location.href.split("?")[1];
-        
-        if (fullPath) {
-            // Redirect to your app's custom scheme using the path and query string
-            window.location.replace(customScheme + "://linkedin-redirect?" + fullPath);
-        } else {
-            // Fallback for if no code is present
-            window.location.replace(customScheme + "://linkedin-redirect");
-        }
-    </script>
+    <meta charset="UTF-8">
+    <title>Chouf Remote Expert Portal (P2P)</title>
+    <style>
+        body { font-family: -apple-system, Arial, sans-serif; background: #121212; color: #e0e0e0; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 20px; }
+        h2 { margin-bottom: 5px; color: #1a73e8; }
+        #status { font-size: 14px; margin-bottom: 15px; color: #888; }
+        #container { display: flex; flex-direction: column; align-items: center; max-width: 640px; }
+        #viewport-container { position: relative; width: 640px; height: 360px; border: 2px solid #333; border-radius: 8px; overflow: hidden; cursor: crosshair; background: #000; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        #input-panel { width: 100%; display: flex; margin-top: 15px; gap: 10px; }
+        input { flex-grow: 1; padding: 12px; border-radius: 6px; border: 1px solid #444; background: #222; color: #fff; font-size: 16px; }
+        button { padding: 12px 20px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 14px; }
+        .btn-send { background: #1a73e8; color: white; }
+        .btn-clear { background: #3c4043; color: white; }
+    </style>
+    <!-- Import Free PeerJS Signaling Library -->
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
 </head>
 <body>
-    <p>Redirecting to your mobile application...</p>
+    <div id="container">
+        <h2>Chouf Expert Control Portal</h2>
+        <div id="status">Connecting to matchmaking server...</div>
+        
+        <div id="viewport-container" onclick="handleCanvasClick(event)">
+            <!-- WebRTC Live Video Stream -->
+            <video id="live-stream" autoplay playsinline></video>
+        </div>
+
+        <div id="input-panel">
+            <input type="text" id="text-input" placeholder="Type instructions here..." onkeydown="if(event.key==='Enter') sendText()" disabled />
+            <button class="btn-send" onclick="sendText()" disabled>Send</button>
+            <button class="btn-clear" onclick="clearCanvas()" disabled>Clear</button>
+        </div>
+    </div>
+
+    <script>
+        const statusEl = document.getElementById('status');
+        const textInput = document.getElementById('text-input');
+        const buttons = document.querySelectorAll('button');
+        
+        let peer = null;
+        let dataConnection = null;
+        const targetPeerId = 'chouf-wearable-device'; // Unique ID for your Orange Pi
+
+        // 1. Initialize PeerJS connection
+        peer = new Peer('chouf-remote-expert'); // Your laptop ID
+
+        peer.on('open', (id) => {
+            statusEl.innerText = "Connecting to glasses (ID: chouf-wearable-device)...";
+            connectToGlasses();
+        });
+
+        function connectToGlasses() {
+            // Open a data channel for commands
+            dataConnection = peer.connect(targetPeerId);
+
+            dataConnection.on('open', () => {
+                statusEl.innerText = "Direct P2P Link Active! Connected to Glasses.";
+                textInput.removeAttribute('disabled');
+                buttons.forEach(btn => btn.removeAttribute('disabled'));
+            });
+
+            dataConnection.on('close', () => {
+                statusEl.innerText = "Glasses disconnected. Retrying connection...";
+                textInput.setAttribute('disabled', 'true');
+                buttons.forEach(btn => btn.setAttribute('disabled', 'true'));
+                setTimeout(connectToGlasses, 3000);
+            });
+        }
+
+        // 2. Listen for the WebRTC incoming video stream
+        peer.on('call', (call) => {
+            // Answer call with zero outgoing stream (we only want to receive the glasses' camera feed)
+            call.answer();
+            call.on('stream', (remoteStream) => {
+                const video = document.getElementById('live-stream');
+                video.srcObject = remoteStream;
+                video.play();
+            });
+        });
+
+        // 3. Control Command Senders
+        function sendCommand(payload) {
+            if (dataConnection && dataConnection.open) {
+                dataConnection.send(JSON.stringify(payload));
+            }
+        }
+
+        function handleCanvasClick(e) {
+            const rect = e.target.getBoundingClientRect();
+            const x = Math.round(((e.clientX - rect.left) / rect.width) * 1280);
+            const y = Math.round(((e.clientY - rect.top) / rect.height) * 720);
+            sendCommand({ type: 'draw_circle', x: x, y: y });
+        }
+
+        function sendText() {
+            const text = textInput.value.trim();
+            if(text) {
+                sendCommand({ type: 'text', payload: text });
+                textInput.value = '';
+            }
+        }
+
+        function clearCanvas() {
+            sendCommand({ type: 'clear' });
+        }
+    </script>
 </body>
 </html>
