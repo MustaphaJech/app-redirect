@@ -86,7 +86,7 @@
                 return;
             }
 
-            // Initialize PeerJS with explicit secure connection parameters
+            // Initialize PeerJS with secure options
             peer = new Peer('chouf-remote-expert', {
                 debug: 2,
                 secure: true
@@ -125,9 +125,13 @@
                 textInput.removeAttribute('disabled');
                 buttons.forEach(btn => btn.removeAttribute('disabled'));
 
-                // Empty MediaStream prevents null parameter crash in PeerJS
-                const emptyStream = new MediaStream();
-                peer.call(targetPeerId, emptyStream); 
+                // Use dummy 1x1 canvas stream to force valid SDP media attributes without null crash
+                const canvas = document.createElement('canvas');
+                canvas.width = 1; 
+                canvas.height = 1;
+                const dummyStream = canvas.captureStream(1);
+
+                peer.call(targetPeerId, dummyStream); 
             });
 
             dataConnection.on('close', () => {
