@@ -1,90 +1,168 @@
-<script>
-    const statusEl = document.getElementById('status');
-    const textInput = document.getElementById('text-input');
-    const buttons = document.querySelectorAll('button');
-    
-    let peer = null;
-    let dataConnection = null;
-    const targetPeerId = 'chouf-wearable-device'; // Unique ID for your Orange Pi
-
-    // 1. Initialize PeerJS connection with explicit secure configuration & debug logs
-    peer = new Peer('chouf-remote-expert', {
-        debug: 2,
-        secure: true
-    });
-
-    peer.on('open', (id) => {
-        console.log("Connected to PeerJS Signaling Server with ID:", id);
-        statusEl.innerText = "Connecting to glasses (ID: chouf-wearable-device)...";
-        connectToGlasses();
-    });
-
-    peer.on('error', (err) => {
-        console.error("PeerJS Error:", err);
-        statusEl.innerText = "Error: " + err.type;
-    });
-
-    function connectToGlasses() {
-        // 1. Open the data channel for annotations/text commands
-        dataConnection = peer.connect(targetPeerId);
-
-        dataConnection.on('open', () => {
-            console.log("Data connection established with Python!");
-            statusEl.innerText = "Direct P2P Link Active! Connected to Glasses.";
-            textInput.removeAttribute('disabled');
-            buttons.forEach(btn => btn.removeAttribute('disabled'));
-
-            // 2. Trigger Python video stream by calling with an empty MediaStream
-            const emptyStream = new MediaStream();
-            peer.call(targetPeerId, emptyStream); 
-        });
-
-        dataConnection.on('close', () => {
-            console.warn("Data connection closed. Retrying...");
-            statusEl.innerText = "Glasses disconnected. Retrying connection...";
-            textInput.setAttribute('disabled', 'true');
-            buttons.forEach(btn => btn.setAttribute('disabled', 'true'));
-            setTimeout(connectToGlasses, 3000);
-        });
-    }
-
-    // 2. Listen for incoming video stream from Python (aiortc)
-    peer.on('call', (call) => {
-        console.log("Incoming media call from glasses...");
-        // Answer without sending back local camera/mic
-        call.answer();
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chouf Remote Expert Portal (P2P)</title>
+    <style>
+        body { 
+            font-family: -apple-system, Arial, sans-serif; 
+            background: #121212; 
+            color: #e0e0e0; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            margin: 0; 
+            padding: 20px; 
+        }
+        h2 { margin-bottom: 5px; color: #1a73e8; }
+        #status { font-size: 14px; margin-bottom: 15px; color: #888; }
+        #container { display: flex; flex-direction: column; align-items: center; max-width: 640px; }
+        #viewport-container { 
+            position: relative; 
+            width: 640px; 
+            height: 360px; 
+            border: 2px solid #333; 
+            border-radius: 8px; 
+            overflow: hidden; 
+            cursor: crosshair; 
+            background: #000; 
+        }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        #input-panel { width: 100%; display: flex; margin-top: 15px; gap: 10px; }
+        input { 
+            flex-grow: 1; 
+            padding: 12px; 
+            border-radius: 6px; 
+            border: 1px solid #444; 
+            background: #222; 
+            color: #fff; 
+            font-size: 16px; 
+        }
+        button { 
+            padding: 12px 20px; 
+            border: none; 
+            border-radius: 6px; 
+            font-weight: bold; 
+            cursor: pointer; 
+            font-size: 14px; 
+        }
+        .btn-send { background: #1a73e8; color: white; }
+        .btn-clear { background: #3c4043; color: white; }
+    </style>
+    <!-- PeerJS Library via jsDelivr CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body>
+    <div id="container">
+        <h2>Chouf Expert Control Portal</h2>
+        <div id="status">Connecting to matchmaking server...</div>
         
-        call.on('stream', (remoteStream) => {
-            console.log("Received remote video stream!");
-            const video = document.getElementById('live-stream');
-            video.srcObject = remoteStream;
-            video.play().catch(e => console.error("Video play error:", e));
+        <div id="viewport-container" onclick="handleCanvasClick(event)">
+            <!-- WebRTC Live Video Stream -->
+            <video id="live-stream" autoplay playsinline muted></video>
+        </div>
+
+        <div id="input-panel">
+            <input type="text" id="text-input" placeholder="Type instructions here..." onkeydown="if(event.key==='Enter') sendText()" disabled />
+            <button class="btn-send" onclick="sendText()" disabled>Send</button>
+            <button class="btn-clear" onclick="clearCanvas()" disabled>Clear</button>
+        </div>
+    </div>
+
+    <script>
+        const statusEl = document.getElementById('status');
+        const textInput = document.getElementById('text-input');
+        const buttons = document.querySelectorAll('button');
+        
+        let peer = null;
+        let dataConnection = null;
+        const targetPeerId = 'chouf-wearable-device';
+
+        window.addEventListener('load', () => {
+            if (typeof Peer === 'undefined') {
+                statusEl.innerText = "Error: PeerJS library failed to load from CDN.";
+                console.error("PeerJS library is undefined.");
+                return;
+            }
+
+            // Initialize PeerJS with explicit secure connection parameters
+            peer = new Peer('chouf-remote-expert', {
+                debug: 2,
+                secure: true
+            });
+
+            peer.on('open', (id) => {
+                console.log("Connected to PeerJS Signaling Server with ID:", id);
+                statusEl.innerText = "Connecting to glasses (ID: chouf-wearable-device)...";
+                connectToGlasses();
+            });
+
+            peer.on('error', (err) => {
+                console.error("PeerJS Error:", err);
+                statusEl.innerText = "Error: " + err.type;
+            });
+
+            peer.on('call', (call) => {
+                console.log("Incoming media call from glasses...");
+                call.answer();
+                
+                call.on('stream', (remoteStream) => {
+                    console.log("Received remote video stream!");
+                    const video = document.getElementById('live-stream');
+                    video.srcObject = remoteStream;
+                    video.play().catch(e => console.error("Video play error:", e));
+                });
+            });
         });
-    });
 
-    // 3. Control Command Senders
-    function sendCommand(payload) {
-        if (dataConnection && dataConnection.open) {
-            dataConnection.send(JSON.stringify(payload));
+        function connectToGlasses() {
+            dataConnection = peer.connect(targetPeerId);
+
+            dataConnection.on('open', () => {
+                console.log("Data connection established with Python!");
+                statusEl.innerText = "Direct P2P Link Active! Connected to Glasses.";
+                textInput.removeAttribute('disabled');
+                buttons.forEach(btn => btn.removeAttribute('disabled'));
+
+                // Empty MediaStream prevents null parameter crash in PeerJS
+                const emptyStream = new MediaStream();
+                peer.call(targetPeerId, emptyStream); 
+            });
+
+            dataConnection.on('close', () => {
+                console.warn("Data connection closed. Retrying...");
+                statusEl.innerText = "Glasses disconnected. Retrying connection...";
+                textInput.setAttribute('disabled', 'true');
+                buttons.forEach(btn => btn.setAttribute('disabled', 'true'));
+                setTimeout(connectToGlasses, 3000);
+            });
         }
-    }
 
-    function handleCanvasClick(e) {
-        const rect = e.target.getBoundingClientRect();
-        const x = Math.round(((e.clientX - rect.left) / rect.width) * 1280);
-        const y = Math.round(((e.clientY - rect.top) / rect.height) * 720);
-        sendCommand({ type: 'draw_circle', x: x, y: y });
-    }
-
-    function sendText() {
-        const text = textInput.value.trim();
-        if(text) {
-            sendCommand({ type: 'text', payload: text });
-            textInput.value = '';
+        function sendCommand(payload) {
+            if (dataConnection && dataConnection.open) {
+                dataConnection.send(JSON.stringify(payload));
+            }
         }
-    }
 
-    function clearCanvas() {
-        sendCommand({ type: 'clear' });
-    }
-</script>
+        function handleCanvasClick(e) {
+            const rect = e.target.getBoundingClientRect();
+            const x = Math.round(((e.clientX - rect.left) / rect.width) * 1280);
+            const y = Math.round(((e.clientY - rect.top) / rect.height) * 720);
+            sendCommand({ type: 'draw_circle', x: x, y: y });
+        }
+
+        function sendText() {
+            const text = textInput.value.trim();
+            if (text) {
+                sendCommand({ type: 'text', payload: text });
+                textInput.value = '';
+            }
+        }
+
+        function clearCanvas() {
+            sendCommand({ type: 'clear' });
+        }
+    </script>
+</body>
+</html>
