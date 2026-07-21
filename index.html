@@ -96,7 +96,6 @@
                 return;
             }
 
-            // Register as Remote Expert Portal
             peer = new Peer('chouf-remote-expert', {
                 debug: 2,
                 secure: true
@@ -104,7 +103,7 @@
 
             peer.on('open', (id) => {
                 console.log("Registered as Expert Portal with ID:", id);
-                statusEl.innerText = "Portal Ready. Waiting for call from wearable (chouf-wearable-device)...";
+                statusEl.innerText = "Portal Ready. Waiting for call from wearable...";
             });
 
             peer.on('error', (err) => {
@@ -112,30 +111,37 @@
                 statusEl.innerText = "Connection Error: " + err.type;
             });
 
-            // Handle incoming Data Connection if initiated by wearable
+            // Handle incoming Data Connection from Glasses
             peer.on('connection', (conn) => {
                 dataConnection = conn;
-                console.log("DataConnection established with wearable!");
+                console.log("DataConnection established!");
                 conn.on('open', () => {
                     statusEl.innerText = "Direct P2P Link Active! Connected to Wearable.";
                     enableControls();
                 });
             });
 
-            // Handle incoming Video Stream Call from Wearable
+            // Handle incoming Video Call
             peer.on('call', (call) => {
                 activeMediaCall = call;
-                console.log("Incoming video stream call from wearable...");
                 call.answer();
 
                 call.on('stream', (remoteStream) => {
-                    console.log("Rendering live video stream from wearable!");
+                    console.log("Rendering live video stream!");
                     const video = document.getElementById('live-stream');
                     video.srcObject = remoteStream;
                     video.play().catch(e => console.error("Video play error:", e));
                     
                     statusEl.innerText = "Direct Stream Active! Connected to Wearable.";
                     enableControls();
+
+                    // Dial back data connection if not open
+                    if (!dataConnection) {
+                        dataConnection = peer.connect(targetPeerId);
+                        dataConnection.on('open', () => {
+                            console.log("Outbound Data Connection Opened!");
+                        });
+                    }
                 });
             });
         });
@@ -151,39 +157,24 @@
         }
 
         function sendCommand(payload) {
-            // Option A: Send via direct PeerJS DataConnection if available
             if (dataConnection && dataConnection.open) {
-                console.log("Sending command via DataConnection:", payload);
+                console.log("Sending command to wearable:", payload);
                 dataConnection.send(JSON.stringify(payload));
-                return;
-            }
-
-            // Option B: PeerJS Socket Send wrapper
-            if (peer && peer.socket) {
-                console.log("Sending command via PeerJS signaling transport:", payload);
-                const msg = {
+            } else if (peer && peer.socket) {
+                console.log("Fallback sending over PeerJS socket:", payload);
+                peer.socket.send({
                     type: "CMD",
                     src: "chouf-remote-expert",
                     dst: targetPeerId,
                     payload: payload
-                };
-                
-                // PeerJS socket wrapper method call
-                if (typeof peer.socket.send === 'function') {
-                    peer.socket.send(msg);
-                } else if (peer.socket._ws && peer.socket._ws.readyState === WebSocket.OPEN) {
-                    peer.socket._ws.send(JSON.stringify(msg));
-                } else {
-                    console.warn("PeerJS socket is not in OPEN state.");
-                }
+                });
             } else {
-                console.warn("No active network channel available to send command.");
+                console.warn("No active network connection.");
             }
         }
 
         function handleCanvasClick(e) {
             const rect = e.currentTarget.getBoundingClientRect();
-            // Map click position on 640x360 canvas to 1280x720 video resolution
             const x = Math.round(((e.clientX - rect.left) / rect.width) * 1280);
             const y = Math.round(((e.clientY - rect.top) / rect.height) * 720);
             
@@ -194,7 +185,7 @@
         function sendText() {
             const text = textInput.value.trim();
             if (text) {
-                console.log("Sending text subtitle:", text);
+                console.log("Sending subtitle text:", text);
                 sendCommand({ type: 'text', payload: text });
                 textInput.value = '';
             }
