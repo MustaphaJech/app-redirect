@@ -68,7 +68,7 @@
         <div id="status">Initializing PeerJS Matchmaking...</div>
         
         <div id="viewport-container" onclick="handleCanvasClick(event)">
-            <!-- WebRTC Live Video Feed -->
+            <!-- WebRTC Live Video Feed from Glasses -->
             <video id="live-stream" autoplay playsinline muted></video>
         </div>
 
@@ -87,8 +87,7 @@
         
         let peer = null;
         let dataConnection = null;
-        let mediaCall = null;
-        const targetPeerId = 'chouf-wearable-device';
+        let activeMediaCall = null;
 
         window.addEventListener('load', () => {
             if (typeof Peer === 'undefined') {
@@ -96,15 +95,15 @@
                 return;
             }
 
-            // Initialize PeerJS client
+            // Register as Expert Portal
             peer = new Peer('chouf-remote-expert', {
                 debug: 2,
                 secure: true
             });
 
             peer.on('open', (id) => {
-                console.log("PeerJS registered with ID:", id);
-                startConnectionSequence();
+                console.log("Registered as Expert Portal with ID:", id);
+                statusEl.innerText = "Portal Ready. Waiting for call from wearable (chouf-wearable-device)...";
             });
 
             peer.on('error', (err) => {
@@ -112,59 +111,36 @@
                 statusEl.innerText = "Connection Error: " + err.type;
             });
 
+            // Listen for incoming Data Connection from Glasses
+            peer.on('connection', (conn) => {
+                dataConnection = conn;
+                console.log("Incoming data connection from wearable:", conn.peer);
+
+                conn.on('open', () => {
+                    statusEl.innerText = "Direct P2P Link Active! Connected to Wearable.";
+                    enableControls();
+                });
+
+                conn.on('close', () => {
+                    statusEl.innerText = "Wearable disconnected. Waiting for call...";
+                    disableControls();
+                });
+            });
+
+            // Listen for incoming Video Stream Call from Glasses
             peer.on('call', (call) => {
-                mediaCall = call;
-                call.answer();
+                activeMediaCall = call;
+                console.log("Incoming video stream from wearable...");
+                call.answer(); // Answer media call
+
                 call.on('stream', (remoteStream) => {
-                    console.log("Received remote video stream!");
+                    console.log("Rendering live video stream from wearable!");
                     const video = document.getElementById('live-stream');
                     video.srcObject = remoteStream;
                     video.play().catch(e => console.error("Video play error:", e));
                 });
             });
         });
-
-        function startConnectionSequence() {
-            let countdown = 5;
-            statusEl.innerText = `Signaling server connected. Dialing wearable (${targetPeerId}) in ${countdown}s...`;
-            
-            const timer = setInterval(() => {
-                countdown--;
-                if (countdown > 0) {
-                    statusEl.innerText = `Signaling server connected. Dialing wearable (${targetPeerId}) in ${countdown}s...`;
-                } else {
-                    clearInterval(timer);
-                    statusEl.innerText = `Dialing wearable (${targetPeerId})...`;
-                    connectToGlasses();
-                }
-            }, 1000);
-        }
-
-        function connectToGlasses() {
-            dataConnection = peer.connect(targetPeerId);
-
-            dataConnection.on('open', () => {
-                statusEl.innerText = "Direct P2P Link Active! Connected to Wearable.";
-                enableControls();
-
-                // Call the wearable to request video
-                const mediaConnection = peer.call(targetPeerId, null, {
-                    offerOptions: { offerToReceiveVideo: true, offerToReceiveAudio: false }
-                });
-
-                mediaConnection.on('stream', (remoteStream) => {
-                    const video = document.getElementById('live-stream');
-                    video.srcObject = remoteStream;
-                    video.play().catch(e => console.error("Video play error:", e));
-                });
-            });
-
-            dataConnection.on('close', () => {
-                statusEl.innerText = "Wearable disconnected. Retrying in 5s...";
-                disableControls();
-                setTimeout(startConnectionSequence, 5000);
-            });
-        }
 
         function enableControls() {
             textInput.removeAttribute('disabled');
@@ -203,7 +179,7 @@
 
         function endCall() {
             if (dataConnection) dataConnection.close();
-            if (mediaCall) mediaCall.close();
+            if (activeMediaCall) activeMediaCall.close();
             const video = document.getElementById('live-stream');
             if (video.srcObject) {
                 video.srcObject.getTracks().forEach(track => track.stop());
