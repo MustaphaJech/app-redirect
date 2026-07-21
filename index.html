@@ -68,7 +68,7 @@
         <div id="status">Initializing PeerJS Matchmaking...</div>
         
         <div id="viewport-container" onclick="handleCanvasClick(event)">
-            <!-- WebRTC Live Video Feed from Glasses -->
+            <!-- WebRTC Live Video Feed -->
             <video id="live-stream" autoplay playsinline muted></video>
         </div>
 
@@ -88,6 +88,7 @@
         let peer = null;
         let dataConnection = null;
         let activeMediaCall = null;
+        const targetPeerId = 'chouf-wearable-device';
 
         window.addEventListener('load', () => {
             if (typeof Peer === 'undefined') {
@@ -111,37 +112,29 @@
                 statusEl.innerText = "Connection Error: " + err.type;
             });
 
-            // Handle incoming Data Connection for commands
+            // Handle incoming Data Connection if available
             peer.on('connection', (conn) => {
                 dataConnection = conn;
                 console.log("Data connection established with wearable!");
-
                 conn.on('open', () => {
                     statusEl.innerText = "Direct P2P Link Active! Connected to Wearable.";
                     enableControls();
                 });
-
-                conn.on('data', (data) => {
-                    console.log("Received data back from wearable:", data);
-                });
-
-                conn.on('close', () => {
-                    statusEl.innerText = "Wearable disconnected. Waiting for call...";
-                    disableControls();
-                });
             });
 
-            // Handle incoming Video Stream Call
+            // Handle incoming Video Stream Call from Glasses
             peer.on('call', (call) => {
                 activeMediaCall = call;
                 console.log("Incoming video stream call from wearable...");
-                call.answer(); // Answer media call
+                call.answer(); // Answer call
 
                 call.on('stream', (remoteStream) => {
                     console.log("Rendering live video stream from wearable!");
                     const video = document.getElementById('live-stream');
                     video.srcObject = remoteStream;
                     video.play().catch(e => console.error("Video play error:", e));
+                    
+                    statusEl.innerText = "Direct Stream Active! Connected to Wearable.";
                     enableControls();
                 });
             });
@@ -158,11 +151,22 @@
         }
 
         function sendCommand(payload) {
+            // First try sending over PeerJS DataConnection if open
             if (dataConnection && dataConnection.open) {
-                console.log("Sending command via PeerJS DataConnection:", payload);
+                console.log("Sending command via DataConnection:", payload);
                 dataConnection.send(JSON.stringify(payload));
+            } else if (peer && peer.socket && peer.socket._ws && peer.socket._ws.readyState === 1) {
+                // Direct WebSocket fallback to main.py over PeerJS signaling
+                console.log("Sending command via PeerJS signaling channel:", payload);
+                const msg = {
+                    type: "CMD",
+                    src: "chouf-remote-expert",
+                    dst: targetPeerId,
+                    payload: payload
+                };
+                peer.socket._ws.send(JSON.stringify(msg));
             } else {
-                console.warn("DataConnection is not open yet.");
+                console.warn("No active network channel available to send command.");
             }
         }
 
