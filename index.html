@@ -3,96 +3,162 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chouf Remote Expert Portal</title>
+    <title>Chouf Remote Expert Portal (P2P)</title>
     <style>
-        body { font-family: sans-serif; background: #121212; color: #fff; display: flex; flex-direction: column; align-items: center; padding: 20px; }
-        #status { font-size: 14px; margin-bottom: 15px; color: #aaa; }
-        #viewport { width: 640px; height: 360px; border: 2px solid #333; background: #000; display: flex; align-items: center; justify-content: center; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+            background: #121212; 
+            color: #e0e0e0; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            margin: 0; 
+            padding: 20px; 
+        }
+        h2 { margin-bottom: 5px; color: #1a73e8; }
+        #status { font-size: 14px; margin-bottom: 15px; color: #888; }
+        #container { display: flex; flex-direction: column; align-items: center; max-width: 640px; width: 100%; }
+        #viewport-container { 
+            position: relative; 
+            width: 640px; 
+            height: 360px; 
+            border: 2px solid #333; 
+            border-radius: 8px; 
+            overflow: hidden; 
+            cursor: crosshair; 
+            background: #000; 
+        }
         video { width: 100%; height: 100%; object-fit: cover; }
-        #controls { margin-top: 15px; display: flex; gap: 10px; width: 640px; }
-        input { flex: 1; padding: 10px; border-radius: 4px; border: 1px solid #444; background: #222; color: #fff; }
-        button { padding: 10px 16px; border: none; border-radius: 4px; background: #1a73e8; color: #fff; font-weight: bold; cursor: pointer; }
+        #input-panel { width: 100%; display: flex; margin-top: 15px; gap: 10px; }
+        input { 
+            flex-grow: 1; 
+            padding: 12px; 
+            border-radius: 6px; 
+            border: 1px solid #444; 
+            background: #222; 
+            color: #fff; 
+            font-size: 15px; 
+        }
+        button { 
+            padding: 12px 18px; 
+            border: none; 
+            border-radius: 6px; 
+            font-weight: bold; 
+            cursor: pointer; 
+            font-size: 14px; 
+            transition: background 0.2s;
+        }
+        .btn-send { background: #1a73e8; color: white; }
+        .btn-send:hover { background: #1557b0; }
+        .btn-clear { background: #3c4043; color: white; }
+        .btn-clear:hover { background: #5f6368; }
+        .btn-end { background: #d93025; color: white; }
+        .btn-end:hover { background: #b31412; }
+        button:disabled, input:disabled { opacity: 0.5; cursor: not-allowed; }
     </style>
-    <!-- PeerJS CDN -->
+    <!-- PeerJS Library via CDN -->
     <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 </head>
 <body>
-    <h2>Chouf Expert Control Portal</h2>
-    <div id="status">Status: Initializing PeerJS...</div>
+    <div id="container">
+        <h2>Chouf Expert Control Portal</h2>
+        <div id="status">Connecting to matchmaking server...</div>
+        
+        <div id="viewport-container" onclick="handleCanvasClick(event)">
+            <!-- WebRTC Video Feed from Python wearable -->
+            <video id="live-stream" autoplay playsinline muted></video>
+        </div>
 
-    <div id="viewport" onclick="handleClick(event)">
-        <video id="remote-video" autoplay playsinline muted></video>
-    </div>
-
-    <div id="controls">
-        <input type="text" id="cmd-input" placeholder="Type instructions here..." onkeydown="if(event.key==='Enter') sendText()" disabled />
-        <button id="btn-send" onclick="sendText()" disabled>Send</button>
-        <button id="btn-clear" onclick="sendClear()" disabled>Clear</button>
+        <div id="input-panel">
+            <input type="text" id="text-input" placeholder="Type instructions here..." onkeydown="if(event.key==='Enter') sendText()" disabled />
+            <button class="btn-send" onclick="sendText()" disabled>Send</button>
+            <button class="btn-clear" onclick="clearCanvas()" disabled>Clear</button>
+            <button class="btn-end" onclick="endCall()" disabled>End Call</button>
+        </div>
     </div>
 
     <script>
         const statusEl = document.getElementById('status');
-        const cmdInput = document.getElementById('cmd-input');
-        const sendBtn = document.getElementById('btn-send');
-        const clearBtn = document.getElementById('btn-clear');
+        const textInput = document.getElementById('text-input');
+        const buttons = document.querySelectorAll('button');
         
         let peer = null;
-        let conn = null;
+        let dataConnection = null;
+        let mediaCall = null;
         const targetPeerId = 'chouf-wearable-device';
 
         window.addEventListener('load', () => {
-            // Initialize PeerJS client with explicit secure flag for GitHub Pages
+            if (typeof Peer === 'undefined') {
+                statusEl.innerText = "Error: PeerJS library failed to load.";
+                return;
+            }
+
             peer = new Peer('chouf-remote-expert', {
                 debug: 2,
                 secure: true
             });
 
             peer.on('open', (id) => {
-                statusEl.innerText = "Status: Connected to signaling. Dialing wearable (ID: " + targetPeerId + ")...";
-                connectToWearable();
+                statusEl.innerText = "Connecting to wearable (ID: chouf-wearable-device)...";
+                connectToGlasses();
             });
 
             peer.on('error', (err) => {
                 console.error("PeerJS Error:", err);
-                statusEl.innerText = "Status Error: " + err.type;
+                statusEl.innerText = "Error: " + err.type;
             });
 
             peer.on('call', (call) => {
+                mediaCall = call;
                 call.answer();
-                call.on('stream', (stream) => {
-                    const video = document.getElementById('remote-video');
-                    video.srcObject = stream;
-                    video.play();
+                call.on('stream', (remoteStream) => {
+                    console.log("Received remote video stream!");
+                    const video = document.getElementById('live-stream');
+                    video.srcObject = remoteStream;
+                    video.play().catch(e => console.error("Video play error:", e));
                 });
             });
         });
 
-        function connectToWearable() {
-            conn = peer.connect(targetPeerId);
+        function connectToGlasses() {
+            dataConnection = peer.connect(targetPeerId);
 
-            conn.on('open', () => {
-                statusEl.innerText = "Status: Direct Link Active!";
-                cmdInput.disabled = false;
-                sendBtn.disabled = false;
-                clearBtn.disabled = false;
+            dataConnection.on('open', () => {
+                statusEl.innerText = "Direct P2P Link Active! Connected to Wearable.";
+                textInput.removeAttribute('disabled');
+                buttons.forEach(btn => btn.removeAttribute('disabled'));
+
+                // Request WebRTC video stream
+                const mediaConnection = peer.call(targetPeerId, null, {
+                    offerOptions: { offerToReceiveVideo: true, offerToReceiveAudio: false }
+                });
+
+                mediaConnection.on('stream', (remoteStream) => {
+                    const video = document.getElementById('live-stream');
+                    video.srcObject = remoteStream;
+                    video.play().catch(e => console.error("Video play error:", e));
+                });
             });
 
-            conn.on('close', () => {
-                statusEl.innerText = "Status: Wearable disconnected. Retrying in 3s...";
-                cmdInput.disabled = true;
-                sendBtn.disabled = true;
-                clearBtn.disabled = true;
-                setTimeout(connectToWearable, 3000);
+            dataConnection.on('close', () => {
+                statusEl.innerText = "Wearable disconnected. Retrying...";
+                disableControls();
+                setTimeout(connectToGlasses, 3000);
             });
         }
 
-        function sendCommand(obj) {
-            if (conn && conn.open) {
-                conn.send(JSON.stringify(obj));
+        function disableControls() {
+            textInput.setAttribute('disabled', 'true');
+            buttons.forEach(btn => btn.setAttribute('disabled', 'true'));
+        }
+
+        function sendCommand(payload) {
+            if (dataConnection && dataConnection.open) {
+                dataConnection.send(JSON.stringify(payload));
             }
         }
 
-        function handleClick(e) {
+        function handleCanvasClick(e) {
             const rect = e.currentTarget.getBoundingClientRect();
             const x = Math.round(((e.clientX - rect.left) / rect.width) * 1280);
             const y = Math.round(((e.clientY - rect.top) / rect.height) * 720);
@@ -100,15 +166,27 @@
         }
 
         function sendText() {
-            const txt = cmdInput.value.trim();
-            if (txt) {
-                sendCommand({ type: 'text', payload: txt });
-                cmdInput.value = '';
+            const text = textInput.value.trim();
+            if (text) {
+                sendCommand({ type: 'text', payload: text });
+                textInput.value = '';
             }
         }
 
-        function sendClear() {
+        function clearCanvas() {
             sendCommand({ type: 'clear' });
+        }
+
+        function endCall() {
+            if (dataConnection) dataConnection.close();
+            if (mediaCall) mediaCall.close();
+            const video = document.getElementById('live-stream');
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+            statusEl.innerText = "Call ended by expert.";
+            disableControls();
         }
     </script>
 </body>
