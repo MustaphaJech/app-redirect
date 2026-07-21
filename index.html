@@ -16,7 +16,7 @@
             padding: 20px; 
         }
         h2 { margin-bottom: 5px; color: #1a73e8; }
-        #status { font-size: 14px; margin-bottom: 15px; color: #888; }
+        #status { font-size: 14px; margin-bottom: 15px; color: #888; font-weight: 500; }
         #container { display: flex; flex-direction: column; align-items: center; max-width: 640px; width: 100%; }
         #viewport-container { 
             position: relative; 
@@ -27,6 +27,9 @@
             overflow: hidden; 
             cursor: crosshair; 
             background: #000; 
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         video { width: 100%; height: 100%; object-fit: cover; }
         #input-panel { width: 100%; display: flex; margin-top: 15px; gap: 10px; }
@@ -56,16 +59,16 @@
         .btn-end:hover { background: #b31412; }
         button:disabled, input:disabled { opacity: 0.5; cursor: not-allowed; }
     </style>
-    <!-- PeerJS Library via CDN -->
+    <!-- PeerJS Library -->
     <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 </head>
 <body>
     <div id="container">
         <h2>Chouf Expert Control Portal</h2>
-        <div id="status">Connecting to matchmaking server...</div>
+        <div id="status">Initializing PeerJS Matchmaking...</div>
         
         <div id="viewport-container" onclick="handleCanvasClick(event)">
-            <!-- WebRTC Video Feed from Python wearable -->
+            <!-- WebRTC Live Video Feed -->
             <video id="live-stream" autoplay playsinline muted></video>
         </div>
 
@@ -93,19 +96,20 @@
                 return;
             }
 
+            // Initialize PeerJS client
             peer = new Peer('chouf-remote-expert', {
                 debug: 2,
                 secure: true
             });
 
             peer.on('open', (id) => {
-                statusEl.innerText = "Connecting to wearable (ID: chouf-wearable-device)...";
-                connectToGlasses();
+                console.log("PeerJS registered with ID:", id);
+                startConnectionSequence();
             });
 
             peer.on('error', (err) => {
                 console.error("PeerJS Error:", err);
-                statusEl.innerText = "Error: " + err.type;
+                statusEl.innerText = "Connection Error: " + err.type;
             });
 
             peer.on('call', (call) => {
@@ -120,15 +124,30 @@
             });
         });
 
+        function startConnectionSequence() {
+            let countdown = 5;
+            statusEl.innerText = `Signaling server connected. Dialing wearable (${targetPeerId}) in ${countdown}s...`;
+            
+            const timer = setInterval(() => {
+                countdown--;
+                if (countdown > 0) {
+                    statusEl.innerText = `Signaling server connected. Dialing wearable (${targetPeerId}) in ${countdown}s...`;
+                } else {
+                    clearInterval(timer);
+                    statusEl.innerText = `Dialing wearable (${targetPeerId})...`;
+                    connectToGlasses();
+                }
+            }, 1000);
+        }
+
         function connectToGlasses() {
             dataConnection = peer.connect(targetPeerId);
 
             dataConnection.on('open', () => {
                 statusEl.innerText = "Direct P2P Link Active! Connected to Wearable.";
-                textInput.removeAttribute('disabled');
-                buttons.forEach(btn => btn.removeAttribute('disabled'));
+                enableControls();
 
-                // Request WebRTC video stream
+                // Call the wearable to request video
                 const mediaConnection = peer.call(targetPeerId, null, {
                     offerOptions: { offerToReceiveVideo: true, offerToReceiveAudio: false }
                 });
@@ -141,10 +160,15 @@
             });
 
             dataConnection.on('close', () => {
-                statusEl.innerText = "Wearable disconnected. Retrying...";
+                statusEl.innerText = "Wearable disconnected. Retrying in 5s...";
                 disableControls();
-                setTimeout(connectToGlasses, 3000);
+                setTimeout(startConnectionSequence, 5000);
             });
+        }
+
+        function enableControls() {
+            textInput.removeAttribute('disabled');
+            buttons.forEach(btn => btn.removeAttribute('disabled'));
         }
 
         function disableControls() {
