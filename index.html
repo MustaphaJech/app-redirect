@@ -68,7 +68,7 @@
         <div id="status">Initializing PeerJS Matchmaking...</div>
         
         <div id="viewport-container" onclick="handleCanvasClick(event)">
-            <!-- WebRTC Live Video Feed from Wearable -->
+            <!-- WebRTC Live Video Feed -->
             <video id="live-stream" autoplay playsinline muted></video>
         </div>
 
@@ -106,33 +106,11 @@
                 statusEl.innerText = "Portal Ready. Waiting for call from wearable...";
             });
 
-            peer.on('disconnected', () => {
-                console.warn("PeerJS disconnected from signaling server. Auto-reconnecting...");
-                statusEl.innerText = "Signaling reconnecting...";
-                setTimeout(() => {
-                    if (peer && !peer.destroyed) {
-                        peer.reconnect();
-                    }
-                }, 1000);
-            });
-
-            peer.on('error', (err) => {
-                console.error("PeerJS Error:", err);
-                if (err.type === 'disconnected') {
-                    peer.reconnect();
-                } else {
-                    statusEl.innerText = "Connection Note: " + err.type;
-                }
-            });
-
-            // Handle incoming Data Connection from Wearable
+            // Handle incoming Data Connection if wearable initiates it
             peer.on('connection', (conn) => {
                 dataConnection = conn;
-                console.log("DataConnection established with wearable!");
-                conn.on('open', () => {
-                    statusEl.innerText = "Direct P2P Link Active! Connected to Wearable.";
-                    enableControls();
-                });
+                console.log("DataConnection received from wearable!");
+                setupDataConnection(conn);
             });
 
             // Handle incoming Video Call from Wearable
@@ -150,14 +128,31 @@
                     statusEl.innerText = "Direct Stream Active! Connected to Wearable.";
                     enableControls();
 
-                    // Dial back DataConnection if not already established
+                    // Connect DataChannel to wearable if not already open
                     if (!dataConnection || !dataConnection.open) {
-                        dataConnection = peer.connect(targetPeerId);
-                        dataConnection.on('open', () => {
-                            console.log("Outbound Data Connection Opened!");
-                        });
+                        console.log("Connecting P2P DataChannel to wearable...");
+                        const conn = peer.connect(targetPeerId);
+                        setupDataConnection(conn);
                     }
                 });
+            });
+        }
+
+        function setupDataConnection(conn) {
+            dataConnection = conn;
+            conn.on('open', () => {
+                console.log("P2P DataChannel open and ready for commands!");
+                statusEl.innerText = "Direct P2P Link Active! Connected to Wearable.";
+                enableControls();
+            });
+
+            conn.on('close', () => {
+                console.warn("DataChannel closed.");
+                disableControls();
+            });
+
+            conn.on('error', (err) => {
+                console.error("DataConnection error:", err);
             });
         }
 
@@ -175,21 +170,10 @@
 
         function sendCommand(payload) {
             if (dataConnection && dataConnection.open) {
-                console.log("Sending command via DataConnection:", payload);
+                console.log("Sending P2P command:", payload);
                 dataConnection.send(JSON.stringify(payload));
-            } else if (peer && peer.socket && peer.socket._ws && peer.socket._ws.readyState === WebSocket.OPEN) {
-                console.log("Sending command via PeerJS socket:", payload);
-                peer.socket._ws.send(JSON.stringify({
-                    type: "CMD",
-                    src: "chouf-remote-expert",
-                    dst: targetPeerId,
-                    payload: payload
-                }));
             } else {
-                console.warn("No open network channel. Attempting signaling reconnect...");
-                if (peer && peer.disconnected) {
-                    peer.reconnect();
-                }
+                console.warn("P2P DataChannel is not open yet.");
             }
         }
 
