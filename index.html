@@ -86,7 +86,6 @@
                 return;
             }
 
-            // Initialize PeerJS with secure options
             peer = new Peer('chouf-remote-expert', {
                 debug: 2,
                 secure: true
@@ -125,13 +124,20 @@
                 textInput.removeAttribute('disabled');
                 buttons.forEach(btn => btn.removeAttribute('disabled'));
 
-                // Use dummy 1x1 canvas stream to force valid SDP media attributes without null crash
-                const canvas = document.createElement('canvas');
-                canvas.width = 1; 
-                canvas.height = 1;
-                const dummyStream = canvas.captureStream(1);
+                // Explicitly request video receiving capability from PeerJS
+                const mediaConnection = peer.call(targetPeerId, null, {
+                    offerOptions: {
+                        offerToReceiveVideo: true,
+                        offerToReceiveAudio: false
+                    }
+                });
 
-                peer.call(targetPeerId, dummyStream); 
+                mediaConnection.on('stream', (remoteStream) => {
+                    console.log("Received video stream via mediaConnection!");
+                    const video = document.getElementById('live-stream');
+                    video.srcObject = remoteStream;
+                    video.play().catch(e => console.error("Video play error:", e));
+                });
             });
 
             dataConnection.on('close', () => {
