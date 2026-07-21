@@ -68,7 +68,7 @@
         <div id="status">Initializing PeerJS Matchmaking...</div>
         
         <div id="viewport-container" onclick="handleCanvasClick(event)">
-            <!-- WebRTC Live Video Feed -->
+            <!-- WebRTC Live Video Feed from Wearable -->
             <video id="live-stream" autoplay playsinline muted></video>
         </div>
 
@@ -90,14 +90,14 @@
         let activeMediaCall = null;
         const targetPeerId = 'chouf-wearable-device';
 
-        window.addEventListener('load', () => {
+        function initPeer() {
             if (typeof Peer === 'undefined') {
                 statusEl.innerText = "Error: PeerJS library failed to load.";
                 return;
             }
 
             peer = new Peer('chouf-remote-expert', {
-                debug: 2,
+                debug: 1,
                 secure: true
             });
 
@@ -106,28 +106,43 @@
                 statusEl.innerText = "Portal Ready. Waiting for call from wearable...";
             });
 
-            peer.on('error', (err) => {
-                console.error("PeerJS Error:", err);
-                statusEl.innerText = "Connection Error: " + err.type;
+            peer.on('disconnected', () => {
+                console.warn("PeerJS disconnected from signaling server. Auto-reconnecting...");
+                statusEl.innerText = "Signaling reconnecting...";
+                setTimeout(() => {
+                    if (peer && !peer.destroyed) {
+                        peer.reconnect();
+                    }
+                }, 1000);
             });
 
-            // Handle incoming Data Connection from Glasses
+            peer.on('error', (err) => {
+                console.error("PeerJS Error:", err);
+                if (err.type === 'disconnected') {
+                    peer.reconnect();
+                } else {
+                    statusEl.innerText = "Connection Note: " + err.type;
+                }
+            });
+
+            // Handle incoming Data Connection from Wearable
             peer.on('connection', (conn) => {
                 dataConnection = conn;
-                console.log("DataConnection established!");
+                console.log("DataConnection established with wearable!");
                 conn.on('open', () => {
                     statusEl.innerText = "Direct P2P Link Active! Connected to Wearable.";
                     enableControls();
                 });
             });
 
-            // Handle incoming Video Call
+            // Handle incoming Video Call from Wearable
             peer.on('call', (call) => {
                 activeMediaCall = call;
+                console.log("Incoming video stream call from wearable...");
                 call.answer();
 
                 call.on('stream', (remoteStream) => {
-                    console.log("Rendering live video stream!");
+                    console.log("Rendering live video stream from wearable!");
                     const video = document.getElementById('live-stream');
                     video.srcObject = remoteStream;
                     video.play().catch(e => console.error("Video play error:", e));
@@ -135,8 +150,8 @@
                     statusEl.innerText = "Direct Stream Active! Connected to Wearable.";
                     enableControls();
 
-                    // Dial back data connection if not open
-                    if (!dataConnection) {
+                    // Dial back DataConnection if not already established
+                    if (!dataConnection || !dataConnection.open) {
                         dataConnection = peer.connect(targetPeerId);
                         dataConnection.on('open', () => {
                             console.log("Outbound Data Connection Opened!");
@@ -144,7 +159,9 @@
                     }
                 });
             });
-        });
+        }
+
+        window.addEventListener('load', initPeer);
 
         function enableControls() {
             textInput.removeAttribute('disabled');
@@ -158,23 +175,27 @@
 
         function sendCommand(payload) {
             if (dataConnection && dataConnection.open) {
-                console.log("Sending command to wearable:", payload);
+                console.log("Sending command via DataConnection:", payload);
                 dataConnection.send(JSON.stringify(payload));
-            } else if (peer && peer.socket) {
-                console.log("Fallback sending over PeerJS socket:", payload);
-                peer.socket.send({
+            } else if (peer && peer.socket && peer.socket._ws && peer.socket._ws.readyState === WebSocket.OPEN) {
+                console.log("Sending command via PeerJS socket:", payload);
+                peer.socket._ws.send(JSON.stringify({
                     type: "CMD",
                     src: "chouf-remote-expert",
                     dst: targetPeerId,
                     payload: payload
-                });
+                }));
             } else {
-                console.warn("No active network connection.");
+                console.warn("No open network channel. Attempting signaling reconnect...");
+                if (peer && peer.disconnected) {
+                    peer.reconnect();
+                }
             }
         }
 
         function handleCanvasClick(e) {
             const rect = e.currentTarget.getBoundingClientRect();
+            // Map click position on 640x360 container to 1280x720 frame coordinates
             const x = Math.round(((e.clientX - rect.left) / rect.width) * 1280);
             const y = Math.round(((e.clientY - rect.top) / rect.height) * 720);
             
