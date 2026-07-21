@@ -96,7 +96,7 @@
                 return;
             }
 
-            // Register as Expert Portal
+            // Register as Remote Expert Portal
             peer = new Peer('chouf-remote-expert', {
                 debug: 2,
                 secure: true
@@ -112,21 +112,21 @@
                 statusEl.innerText = "Connection Error: " + err.type;
             });
 
-            // Handle incoming Data Connection if available
+            // Handle incoming Data Connection if initiated by wearable
             peer.on('connection', (conn) => {
                 dataConnection = conn;
-                console.log("Data connection established with wearable!");
+                console.log("DataConnection established with wearable!");
                 conn.on('open', () => {
                     statusEl.innerText = "Direct P2P Link Active! Connected to Wearable.";
                     enableControls();
                 });
             });
 
-            // Handle incoming Video Stream Call from Glasses
+            // Handle incoming Video Stream Call from Wearable
             peer.on('call', (call) => {
                 activeMediaCall = call;
                 console.log("Incoming video stream call from wearable...");
-                call.answer(); // Answer call
+                call.answer();
 
                 call.on('stream', (remoteStream) => {
                     console.log("Rendering live video stream from wearable!");
@@ -151,20 +151,31 @@
         }
 
         function sendCommand(payload) {
-            // First try sending over PeerJS DataConnection if open
+            // Option A: Send via direct PeerJS DataConnection if available
             if (dataConnection && dataConnection.open) {
                 console.log("Sending command via DataConnection:", payload);
                 dataConnection.send(JSON.stringify(payload));
-            } else if (peer && peer.socket && peer.socket._ws && peer.socket._ws.readyState === 1) {
-                // Direct WebSocket fallback to main.py over PeerJS signaling
-                console.log("Sending command via PeerJS signaling channel:", payload);
+                return;
+            }
+
+            // Option B: PeerJS Socket Send wrapper
+            if (peer && peer.socket) {
+                console.log("Sending command via PeerJS signaling transport:", payload);
                 const msg = {
                     type: "CMD",
                     src: "chouf-remote-expert",
                     dst: targetPeerId,
                     payload: payload
                 };
-                peer.socket._ws.send(JSON.stringify(msg));
+                
+                // PeerJS socket wrapper method call
+                if (typeof peer.socket.send === 'function') {
+                    peer.socket.send(msg);
+                } else if (peer.socket._ws && peer.socket._ws.readyState === WebSocket.OPEN) {
+                    peer.socket._ws.send(JSON.stringify(msg));
+                } else {
+                    console.warn("PeerJS socket is not in OPEN state.");
+                }
             } else {
                 console.warn("No active network channel available to send command.");
             }
