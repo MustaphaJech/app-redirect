@@ -106,11 +106,11 @@
                 statusEl.innerText = "Portal Ready. Waiting for call from wearable...";
             });
 
-            // Handle incoming Data Connection if wearable initiates it
+            // Listen for DataConnection if opened directly via PeerJS
             peer.on('connection', (conn) => {
                 dataConnection = conn;
-                console.log("DataConnection received from wearable!");
-                setupDataConnection(conn);
+                console.log("DataConnection established via PeerJS!");
+                bindDataConnection(conn);
             });
 
             // Handle incoming Video Call from Wearable
@@ -118,6 +118,14 @@
                 activeMediaCall = call;
                 console.log("Incoming video stream call from wearable...");
                 call.answer();
+
+                // Hook into low-level WebRTC peer connection to capture the DataChannel created by Python
+                if (call.peerConnection) {
+                    call.peerConnection.ondatachannel = (event) => {
+                        console.log("Captured low-level WebRTC DataChannel from Python!");
+                        bindWebRTCDataChannel(event.channel);
+                    };
+                }
 
                 call.on('stream', (remoteStream) => {
                     console.log("Rendering live video stream from wearable!");
@@ -127,33 +135,34 @@
                     
                     statusEl.innerText = "Direct Stream Active! Connected to Wearable.";
                     enableControls();
-
-                    // Connect DataChannel to wearable if not already open
-                    if (!dataConnection || !dataConnection.open) {
-                        console.log("Connecting P2P DataChannel to wearable...");
-                        const conn = peer.connect(targetPeerId);
-                        setupDataConnection(conn);
-                    }
                 });
             });
         }
 
-        function setupDataConnection(conn) {
-            dataConnection = conn;
+        function bindDataConnection(conn) {
             conn.on('open', () => {
-                console.log("P2P DataChannel open and ready for commands!");
-                statusEl.innerText = "Direct P2P Link Active! Connected to Wearable.";
+                console.log("PeerJS DataConnection is OPEN!");
                 enableControls();
             });
+        }
 
-            conn.on('close', () => {
-                console.warn("DataChannel closed.");
+        function bindWebRTCDataChannel(dc) {
+            dataConnection = dc; // Use native RTCDataChannel as transport
+            
+            if (dc.readyState === 'open') {
+                console.log("WebRTC DataChannel is ALREADY OPEN!");
+                enableControls();
+            } else {
+                dc.onopen = () => {
+                    console.log("WebRTC DataChannel opened successfully!");
+                    enableControls();
+                };
+            }
+
+            dc.onclose = () => {
+                console.warn("WebRTC DataChannel closed.");
                 disableControls();
-            });
-
-            conn.on('error', (err) => {
-                console.error("DataConnection error:", err);
-            });
+            };
         }
 
         window.addEventListener('load', initPeer);
@@ -169,12 +178,17 @@
         }
 
         function sendCommand(payload) {
-            if (dataConnection && dataConnection.open) {
-                console.log("Sending P2P command:", payload);
-                dataConnection.send(JSON.stringify(payload));
-            } else {
-                console.warn("P2P DataChannel is not open yet.");
+            const strPayload = JSON.stringify(payload);
+
+            if (dataConnection) {
+                // If native RTCDataChannel
+                if (typeof dataConnection.send === 'function' && (dataConnection.readyState === 'open' || dataConnection.open)) {
+                    console.log("Sending P2P command:", payload);
+                    dataConnection.send(strPayload);
+                    return;
+                }
             }
+            console.warn("P2P DataChannel is not open yet.");
         }
 
         function handleCanvasClick(e) {
