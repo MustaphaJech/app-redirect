@@ -111,14 +111,18 @@
                 statusEl.innerText = "Connection Error: " + err.type;
             });
 
-            // Listen for incoming Data Connection from Glasses
+            // Handle incoming Data Connection for commands
             peer.on('connection', (conn) => {
                 dataConnection = conn;
-                console.log("Incoming data connection from wearable:", conn.peer);
+                console.log("Data connection established with wearable!");
 
                 conn.on('open', () => {
                     statusEl.innerText = "Direct P2P Link Active! Connected to Wearable.";
                     enableControls();
+                });
+
+                conn.on('data', (data) => {
+                    console.log("Received data back from wearable:", data);
                 });
 
                 conn.on('close', () => {
@@ -127,10 +131,10 @@
                 });
             });
 
-            // Listen for incoming Video Stream Call from Glasses
+            // Handle incoming Video Stream Call
             peer.on('call', (call) => {
                 activeMediaCall = call;
-                console.log("Incoming video stream from wearable...");
+                console.log("Incoming video stream call from wearable...");
                 call.answer(); // Answer media call
 
                 call.on('stream', (remoteStream) => {
@@ -138,6 +142,7 @@
                     const video = document.getElementById('live-stream');
                     video.srcObject = remoteStream;
                     video.play().catch(e => console.error("Video play error:", e));
+                    enableControls();
                 });
             });
         });
@@ -154,20 +159,27 @@
 
         function sendCommand(payload) {
             if (dataConnection && dataConnection.open) {
+                console.log("Sending command via PeerJS DataConnection:", payload);
                 dataConnection.send(JSON.stringify(payload));
+            } else {
+                console.warn("DataConnection is not open yet.");
             }
         }
 
         function handleCanvasClick(e) {
             const rect = e.currentTarget.getBoundingClientRect();
+            // Map click position on 640x360 canvas to 1280x720 video resolution
             const x = Math.round(((e.clientX - rect.left) / rect.width) * 1280);
             const y = Math.round(((e.clientY - rect.top) / rect.height) * 720);
+            
+            console.log(`Canvas clicked at (${x}, ${y})`);
             sendCommand({ type: 'draw_circle', x: x, y: y });
         }
 
         function sendText() {
             const text = textInput.value.trim();
             if (text) {
+                console.log("Sending text subtitle:", text);
                 sendCommand({ type: 'text', payload: text });
                 textInput.value = '';
             }
