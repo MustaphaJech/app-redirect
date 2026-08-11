@@ -193,12 +193,15 @@
 
         function handleCanvasClick(e) {
             const rect = e.currentTarget.getBoundingClientRect();
-            // Map click position on 640x360 container to 1280x720 frame coordinates
-            const x = Math.round(((e.clientX - rect.left) / rect.width) * 1280);
-            const y = Math.round(((e.clientY - rect.top) / rect.height) * 720);
             
-            console.log(`Canvas clicked at (${x}, ${y})`);
-            sendCommand({ type: 'draw_circle', x: x, y: y });
+            // Calculate normalized ratio coordinates (0.0 to 1.0)
+            const normX = (e.clientX - rect.left) / rect.width;
+            const normY = (e.clientY - rect.top) / rect.height;
+            
+            console.log(`Canvas clicked at Normalized (${normX.toFixed(3)}, ${normY.toFixed(3)})`);
+            
+            // Send normalized coordinates to main.py
+            sendCommand({ type: 'draw_circle', x: normX, y: normY });
         }
 
         function sendText() {
