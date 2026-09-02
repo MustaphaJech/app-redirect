@@ -59,7 +59,6 @@
         .btn-end:hover { background: #b31412; }
         button:disabled, input:disabled { opacity: 0.5; cursor: not-allowed; }
     </style>
-    <!-- PeerJS Library -->
     <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 </head>
 <body>
@@ -68,7 +67,6 @@
         <div id="status">Initializing PeerJS Matchmaking...</div>
         
         <div id="viewport-container" onclick="handleCanvasClick(event)">
-            <!-- WebRTC Live Video Feed -->
             <video id="live-stream" autoplay playsinline muted></video>
         </div>
 
@@ -84,16 +82,17 @@
         const statusEl = document.getElementById('status');
         const textInput = document.getElementById('text-input');
         const buttons = document.querySelectorAll('button');
+        const video = document.getElementById('live-stream');
         
         let peer = null;
         let dataConnection = null;
         let activeMediaCall = null;
-        const targetPeerId = 'chouf-wearable-device';
+        let isConnected = false;
+        let disconnectTimer = null;
 
         function initPeer() {
-            if (typeof Peer === 'undefined') {
-                statusEl.innerText = "Error: PeerJS library failed to load.";
-                return;
+            if (peer) {
+                try { peer.destroy(); } catch(e) {}
             }
 
             peer = new Peer('chouf-remote-expert', {
@@ -103,66 +102,83 @@
 
             peer.on('open', (id) => {
                 console.log("Registered as Expert Portal with ID:", id);
-                statusEl.innerText = "Portal Ready. Waiting for call from wearable...";
+                statusEl.innerText = "Portal Ready. Listening for Chouf Glasses...";
             });
 
-            // Listen for DataConnection if opened directly via PeerJS
             peer.on('connection', (conn) => {
                 dataConnection = conn;
-                console.log("DataConnection established via PeerJS!");
                 bindDataConnection(conn);
             });
 
-            // Handle incoming Video Call from Wearable
             peer.on('call', (call) => {
                 activeMediaCall = call;
-                console.log("Incoming video stream call from wearable...");
                 call.answer();
 
-                // Hook into low-level WebRTC peer connection to capture the DataChannel created by Python
                 if (call.peerConnection) {
                     call.peerConnection.ondatachannel = (event) => {
-                        console.log("Captured low-level WebRTC DataChannel from Python!");
                         bindWebRTCDataChannel(event.channel);
+                    };
+                    
+                    // Detect when connection drops
+                    call.peerConnection.onconnectionstatechange = () => {
+                        const state = call.peerConnection.connectionState;
+                        if (state === 'disconnected' || state === 'failed' || state === 'closed') {
+                            handleDisconnection();
+                        }
                     };
                 }
 
                 call.on('stream', (remoteStream) => {
-                    console.log("Rendering live video stream from wearable!");
-                    const video = document.getElementById('live-stream');
                     video.srcObject = remoteStream;
-                    video.play().catch(e => console.error("Video play error:", e));
-                    
+                    video.play().catch(e => console.error("Play error:", e));
                     statusEl.innerText = "Direct Stream Active! Connected to Wearable.";
+                    isConnected = true;
+                    clearTimeout(disconnectTimer);
                     enableControls();
                 });
+
+                call.on('close', () => {
+                    handleDisconnection();
+                });
             });
+
+            peer.on('disconnected', () => {
+                handleDisconnection();
+            });
+
+            peer.on('error', (err) => {
+                console.warn("Peer error:", err);
+                if (err.type === 'peer-unavailable') {
+                    // Normal while glasses dial up
+                } else {
+                    handleDisconnection();
+                }
+            });
+        }
+
+        function handleDisconnection() {
+            if (!isConnected) return;
+            isConnected = false;
+            disableControls();
+            statusEl.innerText = "Disconnected! Auto-reconnecting in 3s...";
+            
+            clearTimeout(disconnectTimer);
+            disconnectTimer = setTimeout(() => {
+                // Auto-refresh page to clean up WebRTC states and reconnect
+                window.location.reload();
+            }, 3000);
         }
 
         function bindDataConnection(conn) {
-            conn.on('open', () => {
-                console.log("PeerJS DataConnection is OPEN!");
-                enableControls();
-            });
+            conn.on('open', () => enableControls());
+            conn.on('close', () => handleDisconnection());
         }
 
         function bindWebRTCDataChannel(dc) {
-            dataConnection = dc; // Use native RTCDataChannel as transport
-            
-            if (dc.readyState === 'open') {
-                console.log("WebRTC DataChannel is ALREADY OPEN!");
-                enableControls();
-            } else {
-                dc.onopen = () => {
-                    console.log("WebRTC DataChannel opened successfully!");
-                    enableControls();
-                };
-            }
-
-            dc.onclose = () => {
-                console.warn("WebRTC DataChannel closed.");
-                disableControls();
-            };
+            dataConnection = dc;
+            if (dc.readyState === 'open') enableControls();
+            dc.onopen = () => enableControls();
+            dc.onclose = () => handleDisconnection();
         }
 
         window.addEventListener('load', initPeer);
@@ -179,35 +195,21 @@
 
         function sendCommand(payload) {
             const strPayload = JSON.stringify(payload);
-
-            if (dataConnection) {
-                // If native RTCDataChannel
-                if (typeof dataConnection.send === 'function' && (dataConnection.readyState === 'open' || dataConnection.open)) {
-                    console.log("Sending P2P command:", payload);
-                    dataConnection.send(strPayload);
-                    return;
-                }
+            if (dataConnection && (dataConnection.readyState === 'open' || dataConnection.open)) {
+                dataConnection.send(strPayload);
             }
-            console.warn("P2P DataChannel is not open yet.");
         }
 
         function handleCanvasClick(e) {
             const rect = e.currentTarget.getBoundingClientRect();
-            
-            // Calculate normalized ratio coordinates (0.0 to 1.0)
             const normX = (e.clientX - rect.left) / rect.width;
             const normY = (e.clientY - rect.top) / rect.height;
-            
-            console.log(`Canvas clicked at Normalized (${normX.toFixed(3)}, ${normY.toFixed(3)})`);
-            
-            // Send normalized coordinates to main.py
             sendCommand({ type: 'draw_circle', x: normX, y: normY });
         }
 
         function sendText() {
             const text = textInput.value.trim();
             if (text) {
-                console.log("Sending subtitle text:", text);
                 sendCommand({ type: 'text', payload: text });
                 textInput.value = '';
             }
@@ -220,13 +222,11 @@
         function endCall() {
             if (dataConnection) dataConnection.close();
             if (activeMediaCall) activeMediaCall.close();
-            const video = document.getElementById('live-stream');
             if (video.srcObject) {
                 video.srcObject.getTracks().forEach(track => track.stop());
                 video.srcObject = null;
             }
-            statusEl.innerText = "Call ended by expert.";
-            disableControls();
+            handleDisconnection();
         }
     </script>
 </body>
